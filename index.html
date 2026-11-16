@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glint — a hands-first light puzzle</title>
+    <meta name="description" content="Turn mirrors with your fingertips and guide light into crystals. A seated, hands-first puzzle game for Meta VR devices." />
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070f; color: #e8eeff; overflow: hidden;
+        font-family: system-ui, "Segoe UI", Roboto, sans-serif; }
+      #scene { position: fixed; inset: 0; }
+      #hud { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 18px; display: flex;
+        align-items: center; gap: 14px; pointer-events: none;
+        background: linear-gradient(transparent, rgba(5, 7, 15, 0.9)); }
+      #hud h1 { margin: 0; font-size: 18px; letter-spacing: 0.18em; text-transform: uppercase; }
+      #hud p { margin: 0; flex: 1; font-size: 13px; color: #9fb0e8; }
+      #enter { pointer-events: auto; font: inherit; font-weight: 600; font-size: 15px; color: #05070f;
+        background: #ffb648; border: 0; border-radius: 999px; padding: 10px 24px; cursor: pointer; }
+      #enter:hover { background: #ffc978; }
+      #enter:focus-visible { outline: 3px solid #4fd6ff; outline-offset: 3px; }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #9fb0e8; }
+    </style>
+  </head>
+  <body>
+    <div id="scene"></div>
+    <div id="loading">Loading…</div>
+    <div id="hud">
+      <h1>Glint</h1>
+      <p id="note">Turn the mirrors. Light every crystal.</p>
+      <button id="enter" hidden>Enter VR</button>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
