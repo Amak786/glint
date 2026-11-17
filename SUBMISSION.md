@@ -22,7 +22,9 @@ The rules void entries submitted by a bot or by someone else on your behalf, so 
 
 **Division:** New Experience
 
-**Project link:** your GitHub Pages URL
+**Project link:** https://amak786.github.io/glint/
+
+**Source code:** https://github.com/Amak786/glint
 
 **Target launch date:** choose your own date
 

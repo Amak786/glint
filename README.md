@@ -2,6 +2,8 @@
 
 A seated, hands-first light puzzle for Meta VR devices, built with the Immersive Web SDK (WebXR).
 
+**Play it:** https://amak786.github.io/glint/
+
 A small board floats in front of your chest. Touch a mirror with your fingertip to turn it, bounce the beams around walls and through glass, and light every crystal at once.
 
 ## How to play
