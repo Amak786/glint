@@ -23,6 +23,7 @@ import {
   DirectionalLight,
   Group,
   HemisphereLight,
+  IcosahedronGeometry,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -33,6 +34,8 @@ import {
   PointsMaterial,
   Quaternion,
   SphereGeometry,
+  Sprite,
+  SpriteMaterial,
   SRGBColorSpace,
   TorusGeometry,
   Vector3,
@@ -46,6 +49,7 @@ import {
   DX,
   DY,
   hint,
+  MIXED,
   starsFor,
   trace,
   type Level,
@@ -58,8 +62,8 @@ import {
 const BOARD = 0.36; // playable square, metres
 const TILT = 0.5; // lectern tilt toward the player, radians
 const BEAM_Y = 0.026;
-const COLORS = [0xffb648, 0x4fd6ff];
-const COLOR_NAMES = ['gold', 'blue'];
+const COLORS = [0xffb648, 0x4fd6ff, 0xffffff]; // gold, blue, mixed
+const BEAM_SPEED = 2.2; // metres per second the light front travels
 
 const TIPS: Record<number, string> = {
   0: 'Touch the mirror to turn it',
@@ -68,6 +72,7 @@ const TIPS: Record<number, string> = {
   4: 'Glass splits a beam in two',
   6: 'Gold lights diamonds, blue lights cubes',
   9: 'Dark-framed mirrors are fixed',
+  10: 'White crystals need both colours',
 };
 
 // ---------------------------------------------------------------------------
@@ -189,6 +194,9 @@ class Game {
   private buttons: Record<string, Button> = {};
   private label = new TextPanel(BOARD + 0.06, 0.1);
   private hintRing: Mesh;
+  private pips: MeshStandardMaterial[] = [];
+  /** Small glowing beads on both index fingertips, so the touch point is obvious. */
+  private tips: Mesh[] = [];
   private sparks: Points;
   private sparkVel: Float32Array;
   private sparkLife = 0;
@@ -258,6 +266,26 @@ class Game {
     this.sparks.visible = false;
     this.sparks.frustumCulled = false;
     this.board.add(this.sparks);
+
+    // Progress map: one pip per level, so growth between sessions is visible at a glance.
+    const pitch = BOARD / CAMPAIGN.length;
+    for (let i = 0; i < CAMPAIGN.length; i++) {
+      const material = new MeshStandardMaterial({ color: 0x1b2550, emissive: 0x000000, roughness: 0.5 });
+      const pip = new Mesh(new BoxGeometry(pitch * 0.7, 0.004, 0.012), material);
+      pip.position.set((i - (CAMPAIGN.length - 1) / 2) * pitch, 0.002, -BOARD / 2 - 0.016);
+      this.board.add(pip);
+      this.pips.push(material);
+    }
+
+    for (const side of ['left', 'right'] as const) {
+      const bead = new Mesh(
+        new SphereGeometry(0.0045, 12, 8),
+        new MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0.85 }),
+      );
+      bead.visible = false;
+      world.player.indexTipSpaces[side].add(bead);
+      this.tips.push(bead);
+    }
 
     this.buildButtons();
 
@@ -507,6 +535,15 @@ class Game {
       const gem = shapeFor(piece.color, c * 0.24, material, 0.034);
       gem.name = 'gem';
       visual.add(gem);
+      const halo = new Sprite(
+        new SpriteMaterial({
+          map: dotTexture(), color, transparent: true, opacity: 0,
+          blending: AdditiveBlending, depthWrite: false,
+        }),
+      );
+      halo.name = 'halo';
+      halo.position.y = 0.034;
+      visual.add(halo);
       const ring = new Mesh(new TorusGeometry(c * 0.32, c * 0.02, 6, 28), glow(color, 0.5));
       ring.rotation.x = Math.PI / 2;
       ring.position.y = 0.003;
@@ -572,12 +609,12 @@ class Game {
       if (length < 1e-5) continue;
       const dir = b.clone().sub(a).normalize();
       const quat = new Quaternion().setFromUnitVectors(UP, dir);
-      const mid = a.add(b).multiplyScalar(0.5);
       for (const [geo, mats] of [[CORE_GEO, CORE_MATS], [HALO_GEO, HALO_MATS]] as const) {
         const beam = new Mesh(geo, mats[s.color]);
-        beam.position.copy(mid);
         beam.quaternion.copy(quat);
-        beam.scale.set(1, length, 1);
+        beam.visible = false;
+        // The light front sweeps along the path; update() grows each piece in turn.
+        beam.userData = { from: a.clone(), dir, length, t0: s.t0 * this.cell() };
         this.beamGroup.add(beam);
       }
     }
@@ -662,6 +699,15 @@ class Game {
       [tip, 0.3, tipColor],
     ]);
 
+    // Pips: dark = locked, dim = open, gold = solved (brighter with more stars), white = current.
+    this.pips.forEach((m, i) => {
+      const got = this.save.stars[i] ?? 0;
+      const current = !daily && i === this.index;
+      m.color.set(current ? 0xffffff : got ? 0xffb648 : i <= this.unlocked() ? 0x39457c : 0x141a33);
+      m.emissive.set(current ? 0xffffff : got ? 0xffb648 : 0x000000);
+      m.emissiveIntensity = current ? 0.9 : got * 0.3;
+    });
+
     const b = this.buttons;
     const setEnabled = (button: Button, on: boolean) => {
       button.enabled = on;
@@ -679,6 +725,7 @@ class Game {
 
   update(dt: number, time: number, inXR: boolean) {
     this.now = time;
+    this.tips.forEach((t) => (t.visible = inXR));
 
     // Seat the board once the headset reports a pose; restore it on exit.
     if (inXR && !this.placed) this.placed = this.recenter();
@@ -707,14 +754,23 @@ class Game {
           v.material.emissiveIntensity = 0.12 + v.lit * 2.2;
           v.material.opacity = 0.7 + v.lit * 0.3;
         }
+        const halo = v.visual.getObjectByName('halo') as Sprite;
+        halo.material.opacity = v.lit * (0.55 + Math.sin(time * 4 + p.y) * 0.12);
+        halo.scale.setScalar(this.cell() * (0.9 + v.lit * 0.9));
       }
     }
 
-    // Beams fade in and shimmer.
-    const born = Math.min(1, (time - this.beamBorn) * 6);
+    // Light sweeps out from each emitter, then shimmers.
+    const reach = (time - this.beamBorn) * BEAM_SPEED;
+    for (const beam of this.beamGroup.children) {
+      const d = beam.userData as { from: Vector3; dir: Vector3; length: number; t0: number };
+      const grown = Math.max(0, Math.min(d.length, reach - d.t0));
+      beam.visible = grown > 1e-4;
+      beam.scale.set(1, Math.max(grown, 1e-4), 1);
+      beam.position.copy(d.from).addScaledVector(d.dir, grown / 2);
+    }
     const shimmer = 0.85 + Math.sin(time * 9) * 0.08;
-    for (const m of CORE_MATS) m.opacity = born;
-    for (const m of HALO_MATS) m.opacity = 0.28 * born * shimmer;
+    for (const m of HALO_MATS) m.opacity = 0.28 * shimmer;
 
     // Hint ring.
     if (this.hintTarget && !this.solved) {
@@ -776,9 +832,14 @@ const HALO_MATS = COLORS.map(
     }),
 );
 
-/** Gold is always a diamond and blue is always a cube, so colour is never the only cue. */
+/** Gold is a diamond, blue a cube, mixed a faceted ball, so colour is never the only cue. */
 function shapeFor(color: number, size: number, material: MeshStandardMaterial, y: number) {
-  const geo = color === 0 ? new OctahedronGeometry(size) : new BoxGeometry(size * 1.3, size * 1.3, size * 1.3);
+  const geo =
+    color === 0
+      ? new OctahedronGeometry(size)
+      : color === MIXED
+        ? new IcosahedronGeometry(size * 0.95)
+        : new BoxGeometry(size * 1.3, size * 1.3, size * 1.3);
   const mesh = new Mesh(geo, material);
   mesh.position.y = y;
   if (color === 1) mesh.rotation.set(0.6, 0.6, 0);
@@ -812,8 +873,9 @@ function disposeTree(root: Object3D) {
 // A quiet night-sky room: nothing to look at but the puzzle.
 // ---------------------------------------------------------------------------
 function buildRoom(world: World) {
-  const scene = world.scene;
-  scene.background = new Color(0x05070f);
+  const scene = new Group();
+  world.scene.add(scene);
+  world.scene.background = new Color(0x05070f);
 
   const skyGeo = new SphereGeometry(60, 32, 16);
   const colors = new Float32Array(skyGeo.attributes.position.count * 3);
@@ -847,20 +909,28 @@ function buildRoom(world: World) {
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  scene.add(new HemisphereLight(0x8fa4ff, 0x10142a, 1.3));
+  world.scene.add(new HemisphereLight(0x8fa4ff, 0x10142a, 1.3));
   const key = new DirectionalLight(0xfff1dd, 1.6);
   key.position.set(0.6, 2.2, 0.8);
-  scene.add(key);
+  world.scene.add(key);
+  return scene;
 }
 
 // ---------------------------------------------------------------------------
 // Boot.
 // ---------------------------------------------------------------------------
 let game: Game | undefined;
+let room: Group | undefined;
+let sky: Color | undefined;
 
 class GlintSystem extends createSystem({}) {
   update(delta: number, time: number) {
     const inXR = this.visibilityState.value !== VisibilityState.NonImmersive;
+    // In mixed reality the player's own room replaces the night sky.
+    const mode = this.world.session?.environmentBlendMode;
+    const passthrough = inXR && !!mode && mode !== 'opaque';
+    if (room) room.visible = !passthrough;
+    this.scene.background = passthrough ? null : (sky ?? null);
     game?.update(Math.min(delta, 0.05), time, inXR);
   }
 }
@@ -870,7 +940,8 @@ async function boot() {
   const world = await World.create(container, {
     xr: {
       sessionMode: SessionMode.ImmersiveVR,
-      features: { handTracking: true },
+      // Hands are the only required input; gaze-and-pinch is used where the device offers it.
+      features: { handTracking: true, gazeTracking: true },
       offer: 'always',
     },
     render: {
@@ -885,7 +956,8 @@ async function boot() {
   const input = world.getSystem(InputSystem);
   if (input) input.config.maintainScenePointers.value = true;
 
-  buildRoom(world);
+  room = buildRoom(world);
+  sky = world.scene.background as Color;
   game = new Game(world);
   world.registerSystem(GlintSystem);
   (window as unknown as { glint: Game }).glint = game;
@@ -900,6 +972,14 @@ async function boot() {
       wakeAudio();
       world.launchXR();
     });
+    const mixed = document.getElementById('enter-mr') as HTMLButtonElement;
+    if (await xr!.isSessionSupported('immersive-ar').catch(() => false)) {
+      mixed.hidden = false;
+      mixed.addEventListener('click', () => {
+        wakeAudio();
+        world.launchXR({ sessionMode: SessionMode.ImmersiveAR });
+      });
+    }
   } else {
     note.textContent = 'Open this page on a Meta Quest to play with your hands. Mouse and touch work here.';
   }

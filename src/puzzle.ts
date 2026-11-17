@@ -27,7 +27,12 @@ export interface Segment {
   x1: number;
   y1: number;
   color: number;
+  /** Path length from the emitter to the start of this segment, in cells. */
+  t0: number;
 }
+
+/** Crystal colour that only lights when every beam colour reaches it. */
+export const MIXED = 2;
 
 export interface TraceResult {
   segments: Segment[];
@@ -59,58 +64,64 @@ export function trace(level: Level): TraceResult {
     grid[p.y * n + p.x] = p;
     if (p.kind === 'target') targets.push(p);
   }
-  const lit = targets.map(() => false);
+  const reached = targets.map(() => 0); // bitmask of beam colours per crystal
   const segments: Segment[] = [];
+  let emitterBits = 0;
 
   for (const e of level.pieces) {
     if (e.kind !== 'emitter') continue;
+    emitterBits |= 1 << e.color;
     const seen = new Set<number>();
-    const stack: { x: number; y: number; dir: Dir }[] = [
-      { x: e.x, y: e.y, dir: e.dir },
+    const stack: { x: number; y: number; dir: Dir; t: number }[] = [
+      { x: e.x, y: e.y, dir: e.dir, t: 0 },
     ];
     while (stack.length) {
       const beam = stack.pop()!;
       let { x, y, dir } = beam;
       let sx = x;
       let sy = y;
+      let t0 = beam.t;
+      const push = (x1: number, y1: number) => {
+        segments.push({ x0: sx, y0: sy, x1, y1, color: e.color, t0 });
+        t0 += Math.abs(x1 - sx) + Math.abs(y1 - sy);
+      };
       for (;;) {
         const nx = x + DX[dir];
         const ny = y + DY[dir];
         if (nx < 0 || ny < 0 || nx >= n || ny >= n) {
           // run off the board: draw to the edge
-          segments.push({
-            x0: sx,
-            y0: sy,
-            x1: x + DX[dir] * 0.5,
-            y1: y + DY[dir] * 0.5,
-            color: e.color,
-          });
+          push(x + DX[dir] * 0.5, y + DY[dir] * 0.5);
           break;
         }
         x = nx;
         y = ny;
         const key = (y * n + x) * 4 + dir;
         if (seen.has(key)) {
-          segments.push({ x0: sx, y0: sy, x1: x, y1: y, color: e.color });
+          push(x, y);
           break;
         }
         seen.add(key);
         const p = grid[y * n + x];
         if (!p) continue;
         if (p.kind === 'target') {
-          if (p.color === e.color) lit[targets.indexOf(p)] = true;
+          reached[targets.indexOf(p)] |= 1 << e.color;
           continue; // crystals let light through
         }
-        segments.push({ x0: sx, y0: sy, x1: x, y1: y, color: e.color });
+        push(x, y);
         if (p.kind === 'wall' || p.kind === 'emitter') break;
         const out = (p.slash ? SLASH : BACK)[dir];
-        if (p.kind === 'splitter') stack.push({ x, y, dir });
+        if (p.kind === 'splitter') stack.push({ x, y, dir, t: t0 });
         dir = out;
         sx = x;
         sy = y;
       }
     }
   }
+  const lit = targets.map((p, i) =>
+    p.kind === 'target' && p.color === MIXED
+      ? reached[i] === emitterBits
+      : (reached[i] & (1 << (p as { color: number }).color)) !== 0,
+  );
   return { segments, lit, solved: lit.length > 0 && lit.every(Boolean) };
 }
 
@@ -171,6 +182,8 @@ export interface Recipe {
   targets: number;
   minPar: number;
   locked?: number;
+  /** Extra crystals that need every colour at once. */
+  mixed?: number;
 }
 
 export function generate(seed: number, r: Recipe): Level {
@@ -280,6 +293,19 @@ function tryGenerate(seed: number, r: Recipe): Level | undefined {
     used.add(k.y * n + k.x);
     pieces.push({ kind: 'target', x: k.x, y: k.y, color: k.color });
   }
+  // Mixing crystals go where beams of every colour cross.
+  for (let i = 0; i < (r.mixed ?? 0); i++) {
+    const spot = candidates.find(
+      (k) =>
+        !used.has(k.y * n + k.x) &&
+        Array.from({ length: r.emitters }, (_, c) => c).every((c) =>
+          candidates.some((o) => o.x === k.x && o.y === k.y && o.color === c),
+        ),
+    );
+    if (!spot) return undefined;
+    used.add(spot.y * n + spot.x);
+    pieces.push({ kind: 'target', x: spot.x, y: spot.y, color: MIXED });
+  }
   if (!trace(level).solved) return undefined;
 
   // Lock a few mirrors in their solved pose, then scramble the rest.
@@ -316,12 +342,12 @@ export const CAMPAIGN: Recipe[] = [
   { size: 5, emitters: 2, mirrors: 5, splitters: 0, walls: 2, targets: 3, minPar: 3 },
   { size: 6, emitters: 2, mirrors: 5, splitters: 1, walls: 2, targets: 3, minPar: 3 },
   { size: 6, emitters: 2, mirrors: 6, splitters: 1, walls: 2, targets: 4, minPar: 3, locked: 1 },
-  { size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 4, minPar: 4, locked: 1 },
-  { size: 6, emitters: 2, mirrors: 7, splitters: 2, walls: 3, targets: 5, minPar: 4, locked: 2 },
+  { size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 1, mixed: 1 },
+  { size: 6, emitters: 2, mirrors: 7, splitters: 2, walls: 3, targets: 4, minPar: 4, locked: 2, mixed: 1 },
 ];
 
 const DAILY: Recipe = {
-  size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 4, minPar: 4, locked: 1,
+  size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 1, mixed: 1,
 };
 
 export function campaignLevel(index: number): Level {

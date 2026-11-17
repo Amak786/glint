@@ -36,12 +36,14 @@ I wanted a VR game that asks for nothing: no controllers, no room, no standing u
 
 **What it does**
 
-A tilted board floats in front of your chest. Emitters fire beams of light across it. You touch a mirror to turn it, and the beam re-routes instantly. Light every crystal at once to solve the puzzle. Later levels add glass that splits a beam in two, fixed mirrors you have to work around, and a second colour of light.
+A tilted board floats in front of your chest. Emitters fire beams of light across it. You touch a mirror to turn it, and the beam re-routes instantly. Light every crystal at once to solve the puzzle. Later levels add glass that splits a beam in two, fixed mirrors you have to work around, a second colour of light, and white crystals that only light when both colours cross on them.
 
 - 12 campaign levels, each solvable in under a minute
 - A new Daily Glint every day, with a streak counter
 - Star ratings against par (the fewest possible taps), saved between sessions
 - A hint button that points at the next mirror on the shortest solution
+- A progress map on the board edge that fills with gold as you earn stars
+- Play in a night-sky VR room or in Mixed Reality, with the board floating in your own room
 
 **How I built it**
 
@@ -53,11 +55,11 @@ Fingers are imprecise, so each mirror has a touch target larger than the mirror 
 
 **What's next**
 
-Passthrough mode that anchors the board to a real table, more piece types (colour filters, prisms that mix light), a level editor for sharing puzzles, and gaze-and-pinch selection for devices with eye tracking.
+Anchoring the board to a real table using scene understanding, more piece types (colour filters, prisms), and a level editor for sharing puzzles.
 
 ### Hand interactions
 
-Every action uses hands only. Touching a mirror with the index fingertip turns it; this uses the SDK's poke interaction. Pointing at a mirror and pinching does the same from a distance, for players who prefer not to reach. The six menu buttons work the same two ways. Hovered pieces grow and brighten before you commit. The whole board fits inside a 42 cm square, about 46 cm in front of you, so it passes the airplane-seat test.
+Every action uses hands only. Touching a mirror with the index fingertip turns it; this uses the SDK's poke interaction. Pointing at a mirror and pinching does the same from a distance, for players who prefer not to reach. The six menu buttons work the same two ways. Hovered pieces grow and brighten before you commit, and a small glowing bead on each index fingertip shows exactly where your touch will land. On devices with eye tracking the game also requests gaze input, so you can look at a mirror and pinch. The whole board fits inside a 42 cm square, about 46 cm in front of you, so it passes the airplane-seat test.
 
 ### Accessibility note
 

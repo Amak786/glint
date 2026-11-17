@@ -16,6 +16,10 @@
       #hud p { margin: 0; flex: 1; font-size: 13px; color: #9fb0e8; }
       #enter { pointer-events: auto; font: inherit; font-weight: 600; font-size: 15px; color: #05070f;
         background: #ffb648; border: 0; border-radius: 999px; padding: 10px 24px; cursor: pointer; }
+      #enter-mr { pointer-events: auto; font: inherit; font-weight: 600; font-size: 15px; color: #e8eeff;
+        background: transparent; border: 2px solid #4fd6ff; border-radius: 999px; padding: 8px 20px; cursor: pointer; }
+      #enter-mr:hover { background: rgba(79, 214, 255, 0.15); }
+      #enter-mr:focus-visible { outline: 3px solid #ffb648; outline-offset: 3px; }
       #enter:hover { background: #ffc978; }
       #enter:focus-visible { outline: 3px solid #4fd6ff; outline-offset: 3px; }
       #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #9fb0e8; }
@@ -27,6 +31,7 @@
     <div id="hud">
       <h1>Glint</h1>
       <p id="note">Turn the mirrors. Light every crystal.</p>
+      <button id="enter-mr" hidden>Mixed Reality</button>
       <button id="enter" hidden>Enter VR</button>
     </div>
     <script type="module" src="/src/main.ts"></script>

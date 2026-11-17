@@ -9,7 +9,7 @@ A small board floats in front of your chest. Touch a mirror with your fingertip 
 ## How to play
 
 - **Touch** a mirror with your index finger to turn it. You can also point at it and **pinch**.
-- Light every crystal. Gold light fills diamonds, blue light fills cubes.
+- Light every crystal. Gold light fills diamonds, blue light fills cubes, and white faceted crystals need both colours at once.
 - Glass pieces split a beam in two. Dark-framed mirrors are fixed.
 - Buttons along the near edge: previous / next level, Reset, Hint, Daily, Center (brings the board back in front of you).
 
@@ -17,7 +17,10 @@ No controllers are needed at any point. Everything sits inside a two-foot reach,
 
 ## What is in it
 
-- 12 campaign levels that ramp from one mirror to two colours, splitters and fixed mirrors
+- 12 campaign levels that ramp from one mirror to two colours, splitters, fixed mirrors and colour-mixing crystals
+- Two ways in: a quiet night-sky VR room, or Mixed Reality with the board floating in your own room
+- Gaze-and-pinch selection on devices that offer eye tracking (requested as an optional feature; hands always work)
+- A progress map along the board edge showing every level's stars
 - A new Daily Glint puzzle every day, with a streak counter
 - Star ratings against a par (fewest possible taps), saved between sessions
 - A hint that points at the next mirror on the shortest solution
