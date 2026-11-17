@@ -6,7 +6,8 @@ export default defineConfig({
   base: './',
   plugins: [
     // Emulates a headset (with hands) in a desktop browser during `npm run dev`.
-    iwsdkDev({ emulator: { device: 'metaQuest3' }, https: false }),
+    // The emulated room (with a desk and walls) only exists in `npm run dev`.
+    iwsdkDev({ emulator: { device: 'metaQuest3', environment: 'home_office' }, https: false }),
   ],
   build: { target: 'es2022', chunkSizeWarningLimit: 4000 },
   server: { port: 5183, strictPort: true },

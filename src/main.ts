@@ -24,6 +24,7 @@ import {
   Group,
   HemisphereLight,
   IcosahedronGeometry,
+  Matrix4,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -49,6 +50,7 @@ import {
   DX,
   DY,
   hint,
+  isOffBoard,
   MIXED,
   starsFor,
   trace,
@@ -64,6 +66,7 @@ const TILT = 0.5; // lectern tilt toward the player, radians
 const BEAM_Y = 0.026;
 const COLORS = [0xffb648, 0x4fd6ff, 0xffffff]; // gold, blue, mixed
 const BEAM_SPEED = 2.2; // metres per second the light front travels
+const TABLE_TILT = 0.12; // a gentle lean when the board rests on a real table
 
 const TIPS: Record<number, string> = {
   0: 'Touch the mirror to turn it',
@@ -72,6 +75,7 @@ const TIPS: Record<number, string> = {
   4: 'Glass splits a beam in two',
   6: 'Gold lights diamonds, blue lights cubes',
   9: 'Dark-framed mirrors are fixed',
+  5: 'Send light off the far edge to the crystal',
   10: 'White crystals need both colours',
 };
 
@@ -183,6 +187,106 @@ interface Button {
 }
 
 // ---------------------------------------------------------------------------
+// The player's real room, from WebXR plane detection (mixed reality only).
+// ---------------------------------------------------------------------------
+interface RoomPlane {
+  vertical: boolean;
+  label: string;
+  toWorld: Matrix4;
+  toLocal: Matrix4;
+  poly: [number, number][];
+}
+
+function insidePoly(x: number, z: number, poly: [number, number][]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i];
+    const [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+class Room {
+  planes: RoomPlane[] = [];
+  private lastSample = -1;
+
+  constructor(private readonly world: World) {
+    world.onXRFrame((frame, _dt, time) => {
+      if (time - this.lastSample < 0.25) return;
+      this.lastSample = time;
+      this.sample(frame);
+    });
+  }
+
+  clear() {
+    this.planes = [];
+  }
+
+  private sample(frame: XRFrame) {
+    const detected = (frame as XRFrame & { detectedPlanes?: Set<XRPlane> }).detectedPlanes;
+    const space = this.world.xrReferenceSpace;
+    if (!detected || !space) return;
+    this.world.player.updateMatrixWorld();
+    const rig = this.world.player.matrixWorld;
+    const planes: RoomPlane[] = [];
+    detected.forEach((plane) => {
+      const pose = frame.getPose(plane.planeSpace, space);
+      if (!pose) return;
+      const toWorld = rig.clone().multiply(new Matrix4().fromArray(pose.transform.matrix));
+      planes.push({
+        vertical: plane.orientation === 'vertical',
+        label: ((plane as XRPlane & { semanticLabel?: string }).semanticLabel ?? '').toLowerCase(),
+        toWorld,
+        toLocal: toWorld.clone().invert(),
+        poly: plane.polygon.map((pt) => [pt.x, pt.z] as [number, number]),
+      });
+    });
+    this.planes = planes;
+  }
+
+  /** A spot on a real table or desk in front of the player, if there is one. */
+  findTable(head: Vector3, fwd: Vector3): Vector3 | undefined {
+    const reaches = [0.45, 0.4, 0.5, 0.35, 0.55, 0.6, 0.3, 0.65, 0.7];
+    let best: { point: Vector3; score: number } | undefined;
+    for (const plane of this.planes) {
+      if (plane.vertical || plane.label === 'floor' || plane.label === 'ceiling') continue;
+      const height = plane.toWorld.elements[13];
+      if (height < 0.35 || head.y - height < 0.15 || head.y - height > 0.95) continue;
+      for (let i = 0; i < reaches.length; i++) {
+        const point = head.clone().addScaledVector(fwd, reaches[i]);
+        point.y = height;
+        const local = point.clone().applyMatrix4(plane.toLocal);
+        if (!insidePoly(local.x, local.z, plane.poly)) continue;
+        const score = i + (plane.label === 'table' || plane.label === 'desk' ? 0 : 3);
+        if (!best || score < best.score) best = { point, score };
+        break;
+      }
+    }
+    return best?.point;
+  }
+
+  /** The nearest real wall along a ray, with its normal turned toward the ray's origin. */
+  castWall(origin: Vector3, dir: Vector3, max = 4.5) {
+    let best: { point: Vector3; normal: Vector3; dist: number } | undefined;
+    for (const plane of this.planes) {
+      if (!plane.vertical) continue;
+      const o = origin.clone().applyMatrix4(plane.toLocal);
+      const d = dir.clone().transformDirection(plane.toLocal);
+      if (Math.abs(d.y) < 1e-4) continue;
+      const t = -o.y / d.y;
+      if (t < 0.2 || t > max || (best && t > best.dist)) continue;
+      const hit = o.addScaledVector(d, t);
+      if (!insidePoly(hit.x, hit.z, plane.poly)) continue;
+      const normal = new Vector3(0, 1, 0).transformDirection(plane.toWorld);
+      if (normal.dot(dir) > 0) normal.negate();
+      best = { point: origin.clone().addScaledVector(dir, t), normal, dist: t };
+    }
+    return best;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The game.
 // ---------------------------------------------------------------------------
 class Game {
@@ -212,9 +316,20 @@ class Game {
   private now = 0;
   private beamBorn = 0;
   private placed = false;
+  /** True once the board rests on a real table in mixed reality. */
+  private onTable = false;
+  private lastTableTry = -1;
+  /** True while the player's real room is visible behind the game. */
+  passthrough = false;
+  /** Whether the room crystal currently sits on a real wall. */
+  private onWall = false;
+  private notice?: string;
+  private noticeUntil = 0;
+  private roomView?: PieceView;
+  private port = new Vector3();
   save = loadSave();
 
-  constructor(private world: World) {
+  constructor(private world: World, private room: Room) {
     this.board.rotation.order = 'YXZ';
     this.restPose();
     this.boardEntity = world.createTransformEntity(this.board);
@@ -235,7 +350,8 @@ class Game {
     this.board.add(this.levelGroup, this.beamGroup);
 
     // Status panel stands along the far edge, facing the player.
-    this.label.mesh.position.set(0, 0.066, -BOARD / 2 - 0.035);
+    // Raised so light leaving the far edge passes underneath it.
+    this.label.mesh.position.set(0, 0.125, -BOARD / 2 - 0.035);
     this.label.mesh.rotation.x = -0.25;
     this.board.add(this.label.mesh);
 
@@ -311,10 +427,31 @@ class Game {
     fwd.y = 0;
     if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
     fwd.normalize();
+    this.onTable = false;
+    if (this.passthrough && this.placeOnTable(pos, fwd)) return true;
     this.board.position.copy(pos).addScaledVector(fwd, 0.46);
     this.board.position.y = pos.y - 0.37;
     this.board.rotation.set(TILT, Math.atan2(-fwd.x, -fwd.z), 0);
     return true;
+  }
+
+  /** Rest the board on a real table in front of the player, if the headset found one. */
+  private placeOnTable(head: Vector3, fwd: Vector3) {
+    const spot = this.room.findTable(head, fwd);
+    if (!spot) return false;
+    // Lift so the near edge clears the tabletop despite the lean.
+    this.board.position.copy(spot);
+    this.board.position.y += 0.016 + 0.3 * Math.sin(TABLE_TILT);
+    this.board.rotation.set(TABLE_TILT, Math.atan2(-fwd.x, -fwd.z), 0);
+    this.onTable = true;
+    this.say('Placed on your table');
+    return true;
+  }
+
+  private say(text: string, seconds = 3) {
+    this.notice = text;
+    this.noticeUntil = this.now + seconds;
+    if (this.level) this.updateLabel();
   }
 
   private cell() {
@@ -435,6 +572,7 @@ class Game {
 
   private buildLevel() {
     this.clearLevel();
+    this.roomView = undefined;
     const n = this.level.size;
     const c = this.cell();
 
@@ -555,6 +693,17 @@ class Game {
       piece, root, visual, rot, rotTarget: rot, lit: 0, wasLit: false, lastTap: -1, material,
     };
 
+    if (piece.kind === 'target' && isOffBoard(piece, this.level.size)) {
+      // The room crystal: a glowing port on the far edge, and the crystal out in the room.
+      const port = new Mesh(new BoxGeometry(c * 0.62, 0.006, 0.01), glow(COLORS[piece.color], 1.2));
+      this.cellPos(piece.x, piece.y - 0.5, port.position).y = 0.004;
+      port.name = 'port';
+      this.levelGroup.add(port);
+      this.port.copy(port.position).setY(BEAM_Y);
+      this.roomView = view;
+      this.placeRoomCrystal(1);
+    }
+
     if (interactive) {
       const entity = this.world.createTransformEntity(root, this.boardEntity);
       entity.addComponent(RayInteractable);
@@ -565,6 +714,33 @@ class Game {
       this.levelGroup.add(root);
     }
     return view;
+  }
+
+  /**
+   * Put the room crystal where light leaving the port would land: on a real wall in
+   * mixed reality, or floating ahead of the board otherwise.
+   */
+  private placeRoomCrystal(ease: number) {
+    const view = this.roomView;
+    if (!view) return;
+    this.board.updateMatrixWorld();
+    const origin = this.board.localToWorld(this.port.clone());
+    const dir = new Vector3(0, 0, -1).transformDirection(this.board.matrixWorld);
+    const hit = this.passthrough ? this.room.castWall(origin, dir) : undefined;
+    const wasOnWall = this.onWall;
+    this.onWall = !!hit;
+    const world = hit
+      ? hit.point.clone().addScaledVector(hit.normal, 0.04)
+      : origin.clone().addScaledVector(dir, 0.9);
+    const local = this.board.worldToLocal(world);
+    view.root.position.lerp(local, ease);
+    // Larger with distance so it reads clearly across the room.
+    const dist = view.root.position.distanceTo(this.port);
+    view.root.scale.setScalar(Math.min(5, Math.max(1.8, dist * 2.4)));
+    // Its ring faces back along the beam toward the board.
+    const back = this.port.clone().sub(view.root.position).normalize();
+    view.root.quaternion.setFromUnitVectors(UP, back);
+    if (this.onWall !== wasOnWall) this.updateLabel();
   }
 
   // ---- play ---------------------------------------------------------------
@@ -617,6 +793,20 @@ class Game {
         beam.userData = { from: a.clone(), dir, length, t0: s.t0 * this.cell() };
         this.beamGroup.add(beam);
       }
+      // Light leaving through the port carries on across the room to its crystal.
+      const rp = this.roomView?.piece;
+      if (rp && s.x1 === rp.x && s.y1 === rp.y - 0.5 && s.x0 === s.x1) {
+        const cells = Math.abs(s.y1 - s.y0);
+        for (const [geo, mats] of [[CORE_GEO, CORE_MATS], [HALO_GEO, HALO_MATS]] as const) {
+          const beam = new Mesh(geo, mats[s.color]);
+          beam.visible = false;
+          beam.userData = {
+            from: this.port.clone(), dir: new Vector3(0, 0, -1), length: 0,
+            t0: (s.t0 + cells) * this.cell(), room: true,
+          };
+          this.beamGroup.add(beam);
+        }
+      }
     }
 
     let targetIndex = 0;
@@ -661,7 +851,7 @@ class Game {
     const gems = this.views.filter((v) => v.piece.kind === 'target');
     for (let i = 0; i < pos.count; i++) {
       const from = gems[i % gems.length].root.position;
-      pos.setXYZ(i, from.x, 0.04, from.z);
+      pos.setXYZ(i, from.x, from.y + 0.04, from.z);
       const a = Math.random() * Math.PI * 2;
       const r = 0.02 + Math.random() * 0.07;
       this.sparkVel[i * 3] = Math.cos(a) * r;
@@ -689,6 +879,11 @@ class Game {
       if (daily) tip = `Solved ${stars(this.lastStars)}  New puzzle tomorrow`;
       else if (this.index === CAMPAIGN.length - 1) tip = `All clear ${stars(this.lastStars)}  Try the Daily`;
       else tip = `Solved ${stars(this.lastStars)}`;
+    } else if (this.notice && this.now < this.noticeUntil) {
+      tip = this.notice;
+      tipColor = '#bff0ff';
+    } else if (this.roomView && this.taps === 0 && this.onWall) {
+      tip = 'Aim the light at the crystal on your wall';
     } else {
       tip =
         (!daily && this.taps === 0 && TIPS[this.index]) ||
@@ -731,8 +926,22 @@ class Game {
     if (inXR && !this.placed) this.placed = this.recenter();
     if (!inXR && this.placed) {
       this.placed = false;
+      this.onTable = false;
+      this.room.clear();
       this.restPose();
     }
+    // Planes arrive a moment after mixed reality starts: move onto the table once seen.
+    if (this.placed && this.passthrough && !this.onTable && time - this.lastTableTry > 0.5) {
+      this.lastTableTry = time;
+      const head = this.world.player.head.getWorldPosition(new Vector3());
+      const fwd = this.world.player.head.getWorldDirection(new Vector3()).negate().setY(0);
+      if (fwd.lengthSq() > 1e-4) this.placeOnTable(head, fwd.normalize());
+    }
+    if (this.notice && time >= this.noticeUntil) {
+      this.notice = undefined;
+      this.updateLabel();
+    }
+    this.placeRoomCrystal(Math.min(1, dt * 6));
 
     const ease = Math.min(1, dt * 14);
     for (const v of this.views) {
@@ -763,7 +972,16 @@ class Game {
     // Light sweeps out from each emitter, then shimmers.
     const reach = (time - this.beamBorn) * BEAM_SPEED;
     for (const beam of this.beamGroup.children) {
-      const d = beam.userData as { from: Vector3; dir: Vector3; length: number; t0: number };
+      const d = beam.userData as {
+        from: Vector3; dir: Vector3; length: number; t0: number; room?: boolean;
+      };
+      if (d.room && this.roomView) {
+        // Follow the crystal wherever the room puts it.
+        const span = this.roomView.root.position.clone().sub(d.from);
+        d.length = span.length();
+        d.dir.copy(span.normalize());
+        beam.quaternion.setFromUnitVectors(UP, d.dir);
+      }
       const grown = Math.max(0, Math.min(d.length, reach - d.t0));
       beam.visible = grown > 1e-4;
       beam.scale.set(1, Math.max(grown, 1e-4), 1);
@@ -930,6 +1148,7 @@ class GlintSystem extends createSystem({}) {
     const mode = this.world.session?.environmentBlendMode;
     const passthrough = inXR && !!mode && mode !== 'opaque';
     if (room) room.visible = !passthrough;
+    if (game) game.passthrough = passthrough;
     this.scene.background = passthrough ? null : (sky ?? null);
     game?.update(Math.min(delta, 0.05), time, inXR);
   }
@@ -941,7 +1160,8 @@ async function boot() {
     xr: {
       sessionMode: SessionMode.ImmersiveVR,
       // Hands are the only required input; gaze-and-pinch is used where the device offers it.
-      features: { handTracking: true, gazeTracking: true },
+      // Plane detection lets the board find your table and the light find your walls.
+      features: { handTracking: true, gazeTracking: true, planeDetection: true },
       offer: 'always',
     },
     render: {
@@ -958,7 +1178,7 @@ async function boot() {
 
   room = buildRoom(world);
   sky = world.scene.background as Color;
-  game = new Game(world);
+  game = new Game(world, new Room(world));
   world.registerSystem(GlintSystem);
   (window as unknown as { glint: Game }).glint = game;
 

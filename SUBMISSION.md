@@ -16,7 +16,7 @@ The rules void entries submitted by a bot or by someone else on your behalf, so 
 
 **Submission name:** Glint
 
-**Tagline:** Turn mirrors with your fingertips and bend light into crystals. A calm, seated puzzle you can finish between two bus stops.
+**Tagline:** Turn mirrors with your fingertips and bend light across your real room. A calm, seated puzzle that lives on your own table.
 
 **Track:** Gaming
 
@@ -38,24 +38,26 @@ I wanted a VR game that asks for nothing: no controllers, no room, no standing u
 
 A tilted board floats in front of your chest. Emitters fire beams of light across it. You touch a mirror to turn it, and the beam re-routes instantly. Light every crystal at once to solve the puzzle. Later levels add glass that splits a beam in two, fixed mirrors you have to work around, a second colour of light, and white crystals that only light when both colours cross on them.
 
+**Your room is part of the puzzle.** In Mixed Reality, Glint finds your real table or desk and rests the board on it. In some levels and every daily puzzle, one crystal is not on the board at all: it sits on your real wall, exactly where light leaving the board's far edge would hit. You have to bend the beam out across your room to reach it, so every room produces a slightly different shot. With no wall or table in reach, the board floats in front of you and the crystal hangs in the air instead.
+
 - 12 campaign levels, each solvable in under a minute
 - A new Daily Glint every day, with a streak counter
 - Star ratings against par (the fewest possible taps), saved between sessions
 - A hint button that points at the next mirror on the shortest solution
 - A progress map on the board edge that fills with gold as you earn stars
-- Play in a night-sky VR room or in Mixed Reality, with the board floating in your own room
+- Play in a night-sky VR room, or in Mixed Reality with the board on your own table and a crystal on your own wall
 
 **How I built it**
 
-Glint is a WebXR app built with Meta's Immersive Web SDK, TypeScript and Vite, developed with AI coding tools. Levels come from a seeded generator: it places emitters and mirrors, traces the light, drops crystals on the lit path, then scrambles the mirrors. A brute-force solver checks every mirror combination, rejects boards that are too easy, and sets par. A test script proves all 12 levels and the next 30 daily puzzles are solvable. All sound is synthesised with Web Audio, so there are no assets to download and it starts fast.
+Glint is a WebXR app built with Meta's Immersive Web SDK, TypeScript and Vite, developed with AI coding tools. Levels come from a seeded generator: it places emitters and mirrors, traces the light, drops crystals on the lit path, then scrambles the mirrors. A brute-force solver checks every mirror combination, rejects boards that are too easy, and sets par. A test script proves all 12 levels and the next 30 daily puzzles are solvable. In Mixed Reality it uses WebXR plane detection: horizontal planes at table height become a resting place for the board, and a ray from the board's far edge is cast against detected walls to place the room crystal. All sound is synthesised with Web Audio, so there are no assets to download and it starts fast.
 
 **Challenges**
 
-Fingers are imprecise, so each mirror has a touch target larger than the mirror itself, and a poke and a pinch landing together count as one tap. The board has to be reachable without leaning, so it places itself from your head position when the session starts, and a Center button brings it back.
+Fingers are imprecise, so each mirror has a touch target larger than the mirror itself, and a poke and a pinch landing together count as one tap. The board has to be reachable without leaning, so it places itself from your head position when the session starts, and a Center button brings it back. Rooms I never tested were the hardest part of Mixed Reality: planes arrive a moment after the session starts, tables vary in height and size, and some rooms have no wall in range. Glint keeps retrying the table search for the first seconds, only accepts surfaces at a plausible table height within reach, and falls back to a floating board and crystal whenever the room does not offer a surface.
 
 **What's next**
 
-Anchoring the board to a real table using scene understanding, more piece types (colour filters, prisms), and a level editor for sharing puzzles.
+Persistent anchors so the board stays on your table between sessions, light that bounces off more of the room (including real mirrors and windows), more piece types, and a level editor for sharing puzzles.
 
 ### Hand interactions
 

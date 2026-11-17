@@ -60,8 +60,11 @@ export function trace(level: Level): TraceResult {
   const n = level.size;
   const grid: (Piece | undefined)[] = new Array(n * n);
   const targets: Piece[] = [];
+  // A "room crystal" sits one step beyond the board edge, out in the room.
+  const outside = new Map<string, Piece>();
   for (const p of level.pieces) {
-    grid[p.y * n + p.x] = p;
+    if (isOffBoard(p, n)) outside.set(`${p.x},${p.y}`, p);
+    else grid[p.y * n + p.x] = p;
     if (p.kind === 'target') targets.push(p);
   }
   const reached = targets.map(() => 0); // bitmask of beam colours per crystal
@@ -89,8 +92,10 @@ export function trace(level: Level): TraceResult {
         const nx = x + DX[dir];
         const ny = y + DY[dir];
         if (nx < 0 || ny < 0 || nx >= n || ny >= n) {
-          // run off the board: draw to the edge
+          // run off the board: draw to the edge, and light a room crystal if it waits there
           push(x + DX[dir] * 0.5, y + DY[dir] * 0.5);
+          const out = outside.get(`${nx},${ny}`);
+          if (out) reached[targets.indexOf(out)] |= 1 << e.color;
           break;
         }
         x = nx;
@@ -123,6 +128,17 @@ export function trace(level: Level): TraceResult {
       : (reached[i] & (1 << (p as { color: number }).color)) !== 0,
   );
   return { segments, lit, solved: lit.length > 0 && lit.every(Boolean) };
+}
+
+export function isOffBoard(p: { x: number; y: number }, n: number) {
+  return p.x < 0 || p.y < 0 || p.x >= n || p.y >= n;
+}
+
+/** The room crystal of a level, if it has one. */
+export function roomTarget(level: Level) {
+  return level.pieces.find(
+    (p): p is Extract<Piece, { kind: 'target' }> => p.kind === 'target' && isOffBoard(p, level.size),
+  );
 }
 
 export function turnables(level: Level): Turnable[] {
@@ -184,6 +200,8 @@ export interface Recipe {
   locked?: number;
   /** Extra crystals that need every colour at once. */
   mixed?: number;
+  /** Add a crystal out in the room, reached by sending light off the far edge. */
+  room?: boolean;
 }
 
 export function generate(seed: number, r: Recipe): Level {
@@ -293,6 +311,24 @@ function tryGenerate(seed: number, r: Recipe): Level | undefined {
     used.add(k.y * n + k.x);
     pieces.push({ kind: 'target', x: k.x, y: k.y, color: k.color });
   }
+  // The room crystal waits beyond the far edge, on a beam that has already bounced.
+  if (r.room) {
+    const exits: { x: number; y: number; color: number }[] = [];
+    for (const e of pieces) {
+      if (e.kind !== 'emitter') continue;
+      const solo: Level = {
+        size: n, pieces: pieces.filter((p) => p.kind !== 'emitter' || p === e), par: 0, seed,
+      };
+      trace(solo).segments.forEach((s, depth) => {
+        // Far edge only (+y), so the crystal stays in front of the player's eyes.
+        if (depth === 0 || s.y1 !== n - 0.5 || s.x1 !== s.x0) return;
+        exits.push({ x: s.x1, y: n, color: e.color });
+      });
+    }
+    if (!exits.length) return undefined;
+    const pick = exits[Math.floor(rnd() * exits.length)];
+    pieces.push({ kind: 'target', x: pick.x, y: pick.y, color: pick.color });
+  }
   // Mixing crystals go where beams of every colour cross.
   for (let i = 0; i < (r.mixed ?? 0); i++) {
     const spot = candidates.find(
@@ -337,17 +373,17 @@ export const CAMPAIGN: Recipe[] = [
   { size: 4, emitters: 1, mirrors: 3, splitters: 0, walls: 1, targets: 2, minPar: 2 },
   { size: 5, emitters: 1, mirrors: 4, splitters: 0, walls: 1, targets: 2, minPar: 2 },
   { size: 5, emitters: 1, mirrors: 3, splitters: 1, walls: 1, targets: 2, minPar: 2 },
-  { size: 5, emitters: 1, mirrors: 4, splitters: 1, walls: 2, targets: 3, minPar: 3 },
+  { size: 5, emitters: 1, mirrors: 4, splitters: 1, walls: 2, targets: 2, minPar: 3, room: true },
   { size: 5, emitters: 2, mirrors: 4, splitters: 0, walls: 1, targets: 2, minPar: 2 },
   { size: 5, emitters: 2, mirrors: 5, splitters: 0, walls: 2, targets: 3, minPar: 3 },
-  { size: 6, emitters: 2, mirrors: 5, splitters: 1, walls: 2, targets: 3, minPar: 3 },
+  { size: 6, emitters: 2, mirrors: 5, splitters: 1, walls: 2, targets: 3, minPar: 3, room: true },
   { size: 6, emitters: 2, mirrors: 6, splitters: 1, walls: 2, targets: 4, minPar: 3, locked: 1 },
   { size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 1, mixed: 1 },
-  { size: 6, emitters: 2, mirrors: 7, splitters: 2, walls: 3, targets: 4, minPar: 4, locked: 2, mixed: 1 },
+  { size: 6, emitters: 2, mirrors: 7, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 2, mixed: 1, room: true },
 ];
 
 const DAILY: Recipe = {
-  size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 1, mixed: 1,
+  size: 6, emitters: 2, mirrors: 6, splitters: 2, walls: 3, targets: 3, minPar: 4, locked: 1, mixed: 1, room: true,
 };
 
 export function campaignLevel(index: number): Level {

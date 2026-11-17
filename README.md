@@ -18,7 +18,8 @@ No controllers are needed at any point. Everything sits inside a two-foot reach,
 ## What is in it
 
 - 12 campaign levels that ramp from one mirror to two colours, splitters, fixed mirrors and colour-mixing crystals
-- Two ways in: a quiet night-sky VR room, or Mixed Reality with the board floating in your own room
+- Two ways in: a quiet night-sky VR room, or Mixed Reality where the board rests on your real table
+- Room crystals (levels 6, 9, 12 and every daily): light leaves the board's far edge and must hit a crystal on your real wall. With no wall in range the crystal floats ahead instead
 - Gaze-and-pinch selection on devices that offer eye tracking (requested as an optional feature; hands always work)
 - A progress map along the board edge showing every level's stars
 - A new Daily Glint puzzle every day, with a streak counter
@@ -36,7 +37,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5183. On a desktop browser the SDK's emulator provides a headset and hands; the mouse also works on the flat page. On a Quest, open the deployed URL in the browser and press **Enter VR**.
+Open http://localhost:5183. On a desktop browser the SDK's emulator provides a headset, hands and a simulated home office (desk and walls) for testing Mixed Reality; the mouse also works on the flat page. On a Quest, open the deployed URL in the browser and press **Enter VR**.
 
 ```bash
 npm run check      # proves every campaign level and 30 daily puzzles are solvable
